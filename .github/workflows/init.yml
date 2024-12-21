@@ -1,0 +1,59 @@
+name: Scaffold New Service
+
+on:
+  workflow_dispatch:
+    inputs:
+      service-name:
+        description: "Unique name for the new service."
+        required: true
+        default: ""
+      canonical_name:
+        description: "Canonical Name, or Data Product name that the service will process."
+        required: true
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+
+      - name: Checkout template project
+        uses: actions/checkout@v2
+        with:
+          repository: Silverness/microservice-template
+          path: template
+
+      - name: Set up .NET Core SDK
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Copy template to new folder
+        run: cp -r template src/${{ github.event.inputs.service-name}}
+
+      - name: Replace placeholders
+        run: |
+          find src/${{ github.event.inputs.service-name }} -type f -exec sed -i 's/{{CANONICAL}}/${{ github.event.inputs.canonical_name }}/g' {} +
+
+      - name: Create a new branch
+        run: |
+          git checkout -b add-${{ github.event.inputs.service-name }}
+          git add .
+          git commit -m "Add new folder ${{ github.event.inputs.service-name }} with data product ${{ github.event.inputs.canonical_name }}"
+
+      - name: Push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: git push origin add-${{ github.event.inputs.service-name}}
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: add-${{ github.event.inputs.service-name }}
+          title: "Add new folder ${{ github.event.inputs.service-name }}"
+          body: "This PR adds a new service ${{ github.event.inputs.service-name }} which processes the data product ${{ github.event.inputs.canonical_name }}."
+          labels: new-folder

@@ -1,0 +1,129 @@
+name: New Producer Service with Repo
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain_name:
+        description: "Domain product or DOMAIN that the service will process. Example: 'SalesOrder'."
+        required: true
+        default: ""
+      service-type:
+        description: "Specifies the type of the service. Choose 'producer' if the service generates messages, or 'consumer' if the service processes incoming messages."
+        required: true
+        type: choice
+        options:
+          - producer
+          - consumer
+
+permissions: write-all
+
+jobs:
+  create-repo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4.0.0
+
+      - name: Create new repository from template
+        env:
+          GITHUB_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
+        run: |
+          echo "Creating new repository set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }} from template"
+          gh repo create set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }} --public --template ${{ github.repository }} || { echo "Failed to create repository"; exit 1; }
+          echo "Repository created successfully"
+
+  build:
+    runs-on: ubuntu-latest
+    needs: create-repo
+
+    steps:
+      - name: Checkout newly created repository
+        uses: actions/checkout@v4.0.0
+        with:
+          repository: ${{ github.repository_owner }}/set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+
+      - name: Debug - List files in root directory
+        run: |
+          echo "Listing files in root directory"
+          ls -R
+
+      - name: Debug - List files in src directory
+        working-directory: set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+        run: |
+          echo "Listing files in src directory"
+          if [ -d "src" ]; then
+            ls -R src
+          else
+            echo "Directory src does not exist"
+            exit 1
+          fi
+
+      - name: Replace placeholders in folder names
+        working-directory: set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+        run: |
+          echo "Replacing placeholders in folder names"
+          if [ -d "src/DOMAIN" ]; then
+            mv src/DOMAIN src/${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+          else
+            echo "Directory src/DOMAIN does not exist"
+            exit 1
+          fi
+
+      - name: Debug - List files after folder name replacement
+        working-directory: set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+        run: |
+          echo "Listing files after folder name replacement"
+          ls -R src
+
+      - name: Replace placeholders in file names and content
+        working-directory: set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+        run: |
+          echo "Replacing placeholders in file names and content"
+          find ./src/${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }} -depth -name '*DOMAIN*' | while read path; do
+            newpath=$(echo "$path" | sed "s|DOMAIN|${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}|g")
+            mv "$path" "$newpath"
+          done
+          find ./src/${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }} -type f -exec sed -i "s|DOMAIN|${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}|g" {} +
+          echo "Placeholders replaced successfully"
+
+      - name: Debug - List files after replacement
+        working-directory: set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+        run: |
+          echo "Listing files after placeholder replacement"
+          find ./src/${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }} -type f
+
+      - name: Set git identity
+        working-directory: set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+        run: |
+          echo "Setting git identity"
+          git config user.name "github-actions[bot]"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          echo "Git identity set successfully"
+
+      - name: Commit changes
+        working-directory: set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+        run: |
+          echo "Committing changes"
+          git add .
+          git commit -m "Add new project ${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}"
+          echo "Changes committed successfully"
+
+      - name: Push changes
+        working-directory: set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
+        run: |
+          echo "Pushing changes to remote"
+          git push origin main || (echo "Failed to push changes"; exit 1)
+          echo "Changes pushed successfully"
+
+      - name: Create Pull Request
+        env:
+          GITHUB_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
+        run: |
+          echo "Creating Pull Request"
+          gh pr create -R ${{ github.repository_owner }}/set-${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }} -B main -H main -t "Initial Service Scaffolding" -b "This PR adds a new service ${{ github.event.inputs.domain_name }}-${{ github.event.inputs.service-type }}."
+          echo "Pull Request created successfully"

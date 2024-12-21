@@ -1,0 +1,80 @@
+name: New Producer Service
+
+on:
+  workflow_dispatch:
+    inputs:
+      service-name:
+        description: "Unique name for the new service following the '<domain>-<role>' naming convention. Example: 'salesOrder-producer'."
+        required: true
+        default: ""
+      canonical_name:
+        description: "Canonical Name, or Data Product name that the service will process."
+        required: true
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET Core SDK
+        uses: actions/setup-dotnet@v2
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Pull latest changes from remote
+        run: |
+          git fetch origin
+          git checkout main
+          git pull origin main || (echo "Merge conflict detected. Please resolve manually." && exit 1)
+
+      - name: Create a new branch
+        id: create_branch
+        run: |
+          git checkout -b add-${{ github.event.inputs.service-name }}
+
+      - name: Copy existing folder to new folder
+        run: cp -r .templates/service-template src/${{ github.event.inputs.service-name }}
+
+      - name: Debug - List files before replacement
+        run: find src/${{ github.event.inputs.service-name }} -type f
+
+      - name: Replace placeholders in file names and content
+        run: |
+          find src/${{ github.event.inputs.service-name }} -type f -name '*CANONICAL*' | while read file; do
+            newfile=$(echo $file | sed "s/CANONICAL/${{ github.event.inputs.canonical_name }}/g")
+            mv "$file" "$newfile"
+          done
+          find src/${{ github.event.inputs.service-name }} -type f -exec sed -i "s/CANONICAL/${{ github.event.inputs.canonical_name }}/g" {} +
+
+      - name: Debug - List files after replacement
+        run: find src/${{ github.event.inputs.service-name }} -type f
+
+      - name: Set git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Commit changes
+        run: |
+          git add .
+          git commit -m "Add new folder ${{ github.event.inputs.service-name }} with data product ${{ github.event.inputs.canonical_name }}"
+
+      - name: Push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: git push origin add-${{ github.event.inputs.service-name }}
+
+      - name: Create Pull Request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr create -B main -H add-${{ github.event.inputs.service-name }} -t "Add new folder ${{ github.event.inputs.service-name }}" -b "This PR adds a new service ${{ github.event.inputs.service-name }} which processes the data product ${{ github.event.inputs.canonical_name }}."
+
+      - name: Cleanup branch on failure
+        if: failure()
+        run: |
+          git push origin --delete add-${{ github.event.inputs.service-name }}
+          git branch -D add-${{ github.event.inputs.service-name }}
